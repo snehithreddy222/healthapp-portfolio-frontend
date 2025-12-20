@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+/* =================== BASE =================== */
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply bg-gray-50 text-gray-900 antialiased; }
+
+  :root{
+    /* Brand */
+    --brand-600:#0B74C7;
+    --brand-700:#075EA1;
+
+    /* Focus ring */
+    --ring-soft:#CFE8FF;
+
+    /* Dividers (sidebar seam & table borders) */
+    --divider:#E5E7EB;
+
+    /* Card border */
+    --card-bdr:#E6E8EB;
+  }
+}
+
+/* ================= COMPONENTS / LAYOUT ================= */
+@layer components {
+  /* ---------- App Shell ---------- */
+  .shell { @apply min-h-screen flex bg-gray-50; }
+
+  /* Left rail (sticky, full-height) */
+  .shell-sidebar {
+    @apply w-[244px] bg-white flex flex-col sticky top-0 h-screen;
+    border-right: 1px solid var(--divider);
+  }
+
+  /* Main area (adds a subtle left border to ensure perfect seam with header) */
+  .shell-main { @apply flex-1 bg-gray-50; }
+
+  /* Inner container spacing to match the mock (24–32px gutters) */
+  .main-inner {
+    max-width: 1200px;
+    width: 100%;
+    margin-left: 0;
+    margin-right: auto;
+    padding-top: 24px;
+    padding-bottom: 40px;
+    padding-right: 32px;
+    padding-left: 24px;
+  }
+
+  /* ---------- Topbar ---------- */
+  .search-pill { @apply flex items-center gap-2 px-4 py-2 rounded-full border border-gray-200 bg-gray-50; }
+  .search-input { @apply bg-transparent outline-none text-sm w-full; }
+
+  /* ---------- Sidebar ---------- */
+  .sb-head { @apply h-16 flex items-center px-5; }
+  .nav-item { @apply flex items-center gap-3 px-3 py-2 mx-3 my-1 rounded-lg text-sm text-gray-700 hover:bg-gray-100; }
+  .nav-item-active { @apply bg-sky-100 text-sky-800; }
+
+  /* ---------- Cards / Surfaces ---------- */
+  .card-soft {
+    @apply bg-white rounded-2xl border p-5;
+    border-color: var(--card-bdr);
+    box-shadow:
+      0 1px 2px rgba(16,24,40,.05),
+      0 8px 14px rgba(16,24,40,.05);
+  }
+
+  /* Icon tiles (leading icons in cards) */
+  .tile { @apply w-10 h-10 rounded-lg grid place-items-center border; }
+  .tile-blue  { @apply bg-sky-50   text-sky-700   border-sky-200; }
+  .tile-amber { @apply bg-amber-50 text-amber-700 border-amber-200; }
+
+  /* Date tile (OCT/28 style) */
+  .date-tile { @apply w-14 h-14 rounded-lg grid place-items-center bg-sky-50 border border-sky-200; }
+
+  /* Soft divider (for medication rows / card separators) */
+  .divider { @apply h-px bg-gray-200/60; }
+
+  /* Pills / badges */
+  .pill-green { @apply inline-flex items-center px-2.5 h-6 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200; }
+  .pill-red   { @apply inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-semibold bg-rose-100 text-rose-700; }
+
+  /* ---------- Form Inputs (icon-aligned) ---------- */
+  .input { @apply w-full h-12 rounded-lg border bg-white text-[15px] placeholder-gray-400 px-4 pr-10 border-gray-300 focus:outline-none focus:ring-4 focus:ring-[var(--ring-soft)] focus:border-sky-400; }
+  .input-wrapper{ @apply relative; }
+  .input-icon{ @apply absolute left-3 text-gray-400 inline-flex items-center; top:50%; transform:translateY(-50%); }
+  .input-right{ @apply absolute right-3 text-gray-500 inline-flex items-center; top:50%; transform:translateY(-50%); }
+
+  /* ---------- Buttons ---------- */
+  .btn-primary { @apply inline-flex items-center justify-center h-12 px-5 rounded-lg text-white font-semibold; background:var(--brand-600); }
+  .btn-primary:hover { background:var(--brand-700); }
+}
+
+/* ================= UTILITIES / FIXES ================= */
+@layer utilities {
+  /* optional: subtle left border on main content to ensure seam when header exists */
+  .main-with-seam { @apply border-l border-gray-200/60; }
+}
+
+/* Autofill fix */
+input:-webkit-autofill{
+  -webkit-box-shadow:0 0 0px 1000px white inset!important;
+  -webkit-text-fill-color:inherit!important;
+  transition:background-color 9999s ease-out 0s;
+}

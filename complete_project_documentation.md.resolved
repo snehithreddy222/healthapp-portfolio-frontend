@@ -1,0 +1,215 @@
+# HealthApp - Complete End-to-End Project Documentation
+
+## 1. Project Overview
+**HealthApp** is a modern, secure digital health platform designed to bridge the gap between patients and healthcare providers. It serves as a unified portal where:
+*   **Patients** can book appointments, view medical records, check test results, pay bills, and message their doctors.
+*   **Doctors & Staff** can manage schedules, view patient histories, prescribe medications, and handle administrative tasks.
+*   **Admins** oversee the entire system, managing users, doctors, and configuration.
+
+The system is built with a **Microservices-ready Monolithic Architecture**, separating the Frontend (Client) and Backend (API) into distinct deployable units.
+
+---
+
+## 2. Technology Stack
+
+### 2.1 Backend (`/healthapp-backend`)
+*   **Runtime Environment:** Node.js (v18+)
+*   **Web Framework:** Express.js (v5.x)
+*   **Database:** PostgreSQL
+*   **ORM (Object-Relational Mapping):** Prisma
+*   **Authentication:**
+    *   **JWT (JSON Web Tokens):** For stateless session management.
+    *   **Active Directory (LDAP):** For staff/doctor corporate authentication.
+    *   **Bcrypt:** For secure password hashing of local accounts.
+*   **Payment Processing:** Stripe API
+*   **File Storage:** Azure Blob Storage (via `@azure/storage-blob`)
+*   **Utilities:** `cors`, `dotenv`, `multer` (file uploads).
+
+### 2.2 Frontend (`/healthapp-frontend`)
+*   **Build Tool:** Vite (v6.x)
+*   **Framework:** React (v19.x)
+*   **Language:** JavaScript (ES Modules)
+*   **Styling:** Tailwind CSS (v4.x)
+*   **Routing:** React Router DOM (v7.x)
+*   **State Management:** React Context API (`AuthContext`)
+*   **Form Handling:** React Hook Form + Zod (Schema Validation)
+*   **HTTP Client:** Axios
+*   **UI Components:** `react-icons`, `react-hot-toast` (notifications), `recharts` (charts).
+
+---
+
+## 3. System Architecture & Folder Structure
+
+### 3.1 Backend Structure
+The backend follows the **MVC (Model-View-Controller)** pattern, adapted for an API-first design (so "View" is JSON).
+
+```
+healthapp-backend/
+├── config/             # Configuration files
+├── controllers/        # Business logic (e.g., authController, appointmentController)
+├── middleware/         # Request interceptors (auth.js for JWT verification)
+├── prisma/
+│   ├── schema.prisma   # Database schema definition
+│   └── migrations/     # Database migration history
+├── routes/             # API route definitions (maps URLs to controllers)
+├── services/           # Shared business services (optional abstraction)
+├── utils/              # Helper functions (jwt.js, password.js, adAuth.js)
+├── server.js           # Application entry point
+└── .env                # Environment variables (secrets)
+```
+
+### 3.2 Frontend Structure
+The frontend is a Single Page Application (SPA).
+
+```
+healthapp-frontend/src/
+├── assets/             # Static images and global styles
+├── components/         # Reusable UI components (Buttons, Inputs, Modals)
+├── context/            # Global state providers (AuthContext.jsx)
+├── layouts/            # Page layouts (PatientLayout, DoctorLayout)
+├── pages/              # Main view components (Login, Dashboard, Appointments)
+│   ├── admin/          # Admin-specific pages
+│   ├── doctor/         # Doctor-specific pages
+│   └── patient/        # Patient-specific pages
+├── routes/             # Route protection logic (ProtectedRoute.jsx)
+├── services/           # API integration layer (authService.js, api.js)
+├── utils/              # Utility functions
+├── App.jsx             # Main router configuration
+└── main.jsx            # React entry point
+```
+
+---
+
+## 4. Database Schema (PostgreSQL + Prisma)
+
+The database is designed with relational integrity in mind. Key models include:
+
+### 4.1 Core Identity
+*   **`User`**: The central identity record.
+    *   Fields: `id`, `username`, `email`, `password` (hashed), `role` (PATIENT, DOCTOR, ADMIN), `isAdUser` (flag for AD accounts).
+    *   Relationships: One-to-One with `Patient` and `Doctor`.
+
+### 4.2 Profiles
+*   **`Patient`**: Stores medical demographics.
+    *   Fields: `firstName`, `lastName`, `dob`, `bloodGroup`, `allergies`.
+    *   Relationships: Has many `Appointments`, `MedicalRecords`, `Invoices`.
+*   **`Doctor`**: Stores professional details.
+    *   Fields: `specialization`, `licenseNumber`, `yearsExperience`.
+    *   Relationships: Has many `Appointments`, `Patients` (via appointments).
+
+### 4.3 Clinical & Operational
+*   **`Appointment`**: The core interaction event.
+    *   Fields: `dateTime`, `status` (SCHEDULED, COMPLETED, CANCELLED), `reason`, `notes`.
+    *   Logic: Links a Patient and a Doctor at a specific time.
+*   **`MedicalRecord`**: Clinical notes and diagnosis.
+*   **`Prescription`**: Medication orders.
+*   **`LabResult`**: Test results (with optional file attachments).
+
+### 4.4 Financial
+*   **`Invoice`**: A bill for services.
+    *   Fields: `amountCents`, `status` (DUE, PAID), `stripeSessionId`.
+*   **`Payment`**: A transaction record linked to an Invoice.
+
+---
+
+## 5. Authentication & Authorization Flow
+
+The system implements a **Hybrid Authentication Strategy**:
+
+### 5.1 Patient Login (Local Auth)
+1.  **Input**: User enters username/password on the Login page.
+2.  **Frontend**: `authService.login()` detects a standard user and calls `POST /api/auth/login`.
+3.  **Backend**:
+    *   Finds user in `User` table.
+    *   Compares password hash using `bcrypt`.
+    *   If valid, generates a **JWT** containing `userId` and `role`.
+4.  **Response**: Returns the token and user profile.
+
+### 5.2 Staff Login (Active Directory)
+1.  **Input**: Doctor/Staff enters AD credentials (e.g., `user@healthcare-portal.local`).
+2.  **Frontend**: `authService.login()` detects an email/domain format and calls `POST /api/auth/staff-ad-login`.
+3.  **Backend**:
+    *   Connects to the corporate LDAP server.
+    *   Validates credentials.
+    *   **Auto-Provisioning**: If the user exists in AD but not in the local DB, a local shadow account is automatically created.
+    *   **Role Mapping**: Maps AD groups (e.g., "Physicians") to local roles (e.g., "DOCTOR").
+4.  **Response**: Returns a JWT just like a local user.
+
+### 5.3 Authorization (RBAC)
+*   **Middleware (`middleware/auth.js`)**:
+    *   `authenticateToken`: Verifies the JWT signature on every protected request.
+    *   `authorize(roles)`: Checks if the user's role matches the required access level (e.g., only DOCTORs can view full patient lists).
+
+---
+
+## 6. Key Business Logic & Features
+
+### 6.1 Appointment Scheduling (`appointmentController.js`)
+*   **Slot Generation**: The system dynamically calculates available 30-minute slots based on:
+    *   Clinic working hours (Mon-Fri 9-5, Sat 10-2).
+    *   Holidays (configurable list).
+    *   Existing appointments (to prevent double-booking).
+*   **Validation**: Prevents booking in the past or outside working hours.
+
+### 6.2 Patient Onboarding
+*   New patients sign up via `Register.jsx`.
+*   Upon first login, they are redirected to `/patient/onboarding` to complete their medical profile (allergies, emergency contact) before accessing the dashboard.
+
+### 6.3 Billing & Payments
+*   **Invoicing**: Doctors/Admins can generate invoices for services.
+*   **Stripe Integration**:
+    *   Clicking "Pay" on the frontend creates a Stripe Checkout Session.
+    *   A **Webhook** (`paymentsWebhookRoute.js`) listens for successful payment events from Stripe and automatically updates the `Invoice` status to `PAID` in the database.
+
+---
+
+## 7. API Documentation Summary
+
+### Base URL: `/api`
+
+| Feature | Method | Endpoint | Description | Access |
+| :--- | :--- | :--- | :--- | :--- |
+| **Auth** | POST | `/auth/login` | Local user login | Public |
+| | POST | `/auth/staff-ad-login` | Active Directory login | Public |
+| | POST | `/auth/register` | Patient self-registration | Public |
+| **Patients** | GET | `/patients/me` | Get own profile | Patient |
+| | POST | `/patients/onboarding` | Create/Update profile | Patient |
+| **Doctors** | GET | `/doctors` | List all doctors | Public |
+| | GET | `/doctors/schedule` | Get doctor's calendar | Doctor |
+| **Appointments** | POST | `/appointments` | Book new appointment | Patient |
+| | GET | `/appointments` | List appointments | Auth |
+| | PATCH | `/appointments/:id/cancel` | Cancel appointment | Auth |
+
+*(Refer to `ADMIN_API_ENDPOINTS.md` in the backend folder for the exhaustive list of all 50+ endpoints)*
+
+---
+
+## 8. Setup & Installation Guide
+
+### Prerequisites
+*   Node.js v18+
+*   PostgreSQL Database
+*   Stripe Account (for payments)
+
+### 8.1 Backend Setup
+1.  Navigate to `healthapp-backend`.
+2.  Install dependencies: `npm install`.
+3.  Configure `.env`:
+    ```env
+    DATABASE_URL="postgresql://user:pass@localhost:5432/healthapp"
+    JWT_SECRET="your_super_secret_key"
+    STRIPE_SECRET_KEY="sk_test_..."
+    ```
+4.  Run Database Migrations: `npx prisma migrate dev`.
+5.  Start Server: `npm start` (runs on port 3000).
+
+### 8.2 Frontend Setup
+1.  Navigate to `healthapp-frontend`.
+2.  Install dependencies: `npm install`.
+3.  Start Dev Server: `npm run dev` (runs on port 5173).
+4.  Access the app at `http://localhost:5173`.
+
+---
+
+## 9. Conclusion
+This documentation covers the end-to-end architecture of the HealthApp. The system is designed for scalability, security, and ease of use. The strict separation of concerns, robust type safety with Prisma, and modern React frontend make it a professional-grade solution for healthcare management.

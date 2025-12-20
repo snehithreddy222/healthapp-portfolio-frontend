@@ -1,0 +1,23 @@
+{
+  "name": "HealthApp - Healthcare Management System",
+  "short_name": "HealthApp",
+  "description": "A secure healthcare portal for patients and doctors.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/logo3.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo3.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
