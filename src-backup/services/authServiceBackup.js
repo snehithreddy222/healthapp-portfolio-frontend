@@ -1,17 +1,7 @@
-//---------------------------------------------------------------------
 // src/services/authService.js
-import http from "./http";
+import http, { API_BASE } from "./http";
 
 const USER_KEY = "user";
-
-/**
- * Portfolio behavior:
- * By default, do NOT use Active Directory login at all.
- * If you ever want to enable it again, set:
- * VITE_ENABLE_AD_LOGIN=true
- * in your frontend .env
- */
-const ENABLE_AD_LOGIN = import.meta?.env?.VITE_ENABLE_AD_LOGIN === "true";
 
 function getStoredUser() {
   try {
@@ -30,21 +20,21 @@ function storeUser(obj) {
   }
 }
 
-function clearUser() {
-  try {
-    localStorage.removeItem(USER_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 /**
  * Decide if this identifier looks like a staff (AD) account.
- * This is only used when ENABLE_AD_LOGIN is true.
+ *
+ * Rules (you can adjust domains if needed):
+ * - Contains a backslash: "DOMAIN\\username"
+ * - Ends with "@healthcare-portal.local" (AD domain)
+ * - Ends with "@healthapp.local" (example staff domain)
+ *
+ * Note: We keep this helper for future use, but the current
+ * login() implementation below ignores it so that all logins
+ * go through the local /auth/login endpoint while AD is down.
  */
 function isStaffIdentifier(identifier) {
   if (!identifier) return false;
-  const lower = String(identifier).toLowerCase();
+  const lower = identifier.toLowerCase();
 
   if (lower.includes("\\")) return true;
   if (lower.endsWith("@healthcare-portal.local")) return true;
@@ -65,18 +55,23 @@ export const authService = {
       password,
       role,
     });
-
+    // On successful register, store user so they are logged in
     if (data?.success && data?.data) {
       storeUser(data.data);
     }
-
     return data;
   },
 
   /**
-   * Login behavior:
-   * Normal portfolio login always uses /auth/login.
-   * AD login is supported only when ENABLE_AD_LOGIN is true.
+   * Login flow (TEMPORARY, AD DISABLED):
+   *
+   * For now, we always call /auth/login and never /auth/staff-ad-login,
+   * even if the identifier looks like a staff (AD) username. This lets
+   * the portal work normally using DB-backed accounts while the AD VM
+   * is unavailable.
+   *
+   * Both endpoints (when enabled) return:
+   *   { success, message, data: { userId, username, email, role, token, patientId, doctorId } }
    */
   async login({ username, password }) {
     const identifier = (username || "").trim();
@@ -92,40 +87,25 @@ export const authService = {
       return data;
     };
 
-    if (!ENABLE_AD_LOGIN) {
+    // TEMP: Only use local /auth/login for all users
+    try {
       const { data } = await http.post("/auth/login", {
         username: identifier,
         password,
       });
       return handleSuccess(data);
-    }
+    } catch (err) {
+      const status = err?.response?.status;
 
-    const staffStyle = isStaffIdentifier(identifier);
-
-    if (staffStyle) {
-      try {
-        const { data } = await http.post("/auth/staff-ad-login", {
-          username: identifier,
-          password,
-        });
-        return handleSuccess(data);
-      } catch (err) {
-        const status = err?.response?.status;
-        if (status === 401 || status === 403) throw err;
-
-        const { data } = await http.post("/auth/login", {
-          username: identifier,
-          password,
-        });
-        return handleSuccess(data);
+      // 401/404 here means "invalid username or password" for a local account.
+      // We rethrow so Login.jsx can show the friendly message.
+      if (status === 401 || status === 404) {
+        throw err;
       }
-    }
 
-    const { data } = await http.post("/auth/login", {
-      username: identifier,
-      password,
-    });
-    return handleSuccess(data);
+      // Other errors (500, network, etc.) also bubble up
+      throw err;
+    }
   },
 
   async fetchProfile() {
@@ -134,6 +114,10 @@ export const authService = {
   },
 
   logout() {
-    clearUser();
+    try {
+      localStorage.removeItem(USER_KEY);
+    } catch {
+      // ignore
+    }
   },
 };

@@ -1,3 +1,8 @@
+
+
+
+//---------------------
+
 // src/pages/Login.jsx
 import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -28,7 +33,6 @@ export default function Login() {
     setValue,
     watch,
   } = useForm();
-
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -47,7 +51,6 @@ export default function Login() {
 
   const onSubmit = async (data) => {
     setAuthError("");
-
     try {
       const identifier = (data.username || "").trim();
 
@@ -56,7 +59,42 @@ export default function Login() {
         password: data.password,
       });
 
-      if (!out?.success) {
+      if (out?.success) {
+        if (identifier) {
+          localStorage.setItem(LAST_USERNAME_KEY, identifier);
+        }
+
+        const stored = JSON.parse(localStorage.getItem("user"));
+        const role = stored?.role;
+
+        await Promise.resolve();
+
+        if (role === "ADMIN") {
+          navigate("/admin/dashboard", { replace: true });
+          return;
+        }
+
+        if (role === "DOCTOR") {
+          navigate("/doctor/dashboard", { replace: true });
+          return;
+        }
+
+        if (role === "PATIENT") {
+          try {
+            const me = await patientService.meOrNull();
+            if (!me || !me.id) {
+              navigate("/patient/onboarding", { replace: true });
+            } else {
+              navigate("/patient/dashboard", { replace: true });
+            }
+          } catch {
+            navigate("/patient/dashboard", { replace: true });
+          }
+          return;
+        }
+
+        navigate("/patient/dashboard", { replace: true });
+      } else {
         const msg =
           out?.message ||
           "Incorrect username or password. Please check your details.";
@@ -64,50 +102,7 @@ export default function Login() {
           "Incorrect username or password. Please check your details and try again."
         );
         toast.error(msg);
-        return;
       }
-
-      if (identifier) {
-        localStorage.setItem(LAST_USERNAME_KEY, identifier);
-      }
-
-      const role = out?.data?.role;
-      const patientId = out?.data?.patientId || null;
-      const doctorId = out?.data?.doctorId || null;
-
-      if (role === "ADMIN") {
-        navigate("/admin/dashboard", { replace: true });
-        return;
-      }
-
-      if (role === "DOCTOR") {
-        if (!doctorId) {
-          navigate("/doctor/onboarding", { replace: true });
-        } else {
-          navigate("/doctor/dashboard", { replace: true });
-        }
-        return;
-      }
-
-      if (role === "PATIENT") {
-        try {
-          const me = await patientService.meOrNull();
-          if (!me || !me.id || !patientId) {
-            navigate("/patient/onboarding", { replace: true });
-          } else {
-            navigate("/patient/dashboard", { replace: true });
-          }
-        } catch {
-          if (!patientId) {
-            navigate("/patient/onboarding", { replace: true });
-          } else {
-            navigate("/patient/dashboard", { replace: true });
-          }
-        }
-        return;
-      }
-
-      navigate("/patient/dashboard", { replace: true });
     } catch (e) {
       const msg =
         e?.response?.data?.message || e?.message || "Unable to sign in.";
@@ -121,16 +116,18 @@ export default function Login() {
   const year = new Date().getFullYear();
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col lg:grid lg:grid-cols-2 relative overflow-hidden">
+    <div className="min-h-screen bg-slate-950 text-slate-50 md:grid md:grid-cols-2 flex flex-col relative overflow-hidden">
       <Toaster position="top-right" />
 
+      {/* Background glows */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-24 -left-24 h-64 w-64 rounded-full bg-sky-500/25 blur-3xl" />
         <div className="absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-cyan-400/25 blur-3xl" />
         <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-sky-900/70 via-slate-950 to-transparent" />
       </div>
 
-      <section className="relative hidden lg:flex items-center justify-center px-10">
+      {/* Left hero */}
+      <section className="relative hidden md:flex items-center justify-center px-10">
         <div className="absolute inset-4 rounded-3xl border border-white/10 bg-gradient-to-br from-sky-900/80 via-slate-950/90 to-slate-950/95 backdrop-blur-xl" />
 
         <div className="relative z-10 w-full max-w-lg">
@@ -140,14 +137,16 @@ export default function Login() {
                 <div className="h-5 w-5 rounded-lg bg-white" />
               </div>
               <div>
-                <p className="text-sm font-semibold tracking-tight">HealthApp</p>
+                <p className="text-sm font-semibold tracking-tight">
+                  HealthApp
+                </p>
                 <p className="text-[11px] text-sky-200/80">
                   Patient and clinician portal
                 </p>
               </div>
             </div>
             <span className="hidden sm:inline-flex items-center justify-center px-3 h-7 rounded-full border border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600 whitespace-nowrap">
-              HealthCare portal
+              Patient portal
             </span>
           </div>
 
@@ -159,7 +158,8 @@ export default function Login() {
               Manage your care in one modern, secure place.
             </h1>
             <p className="mt-3 text-sm text-sky-100/90 max-w-md">
-              Check upcoming visits, message, review results, and handle bills in one app.
+              Check upcoming visits, message your care team, review results, and
+              handle bills without phone calls or paper.
             </p>
           </div>
 
@@ -173,9 +173,11 @@ export default function Login() {
                   Visits
                 </p>
               </div>
-              <p className="text-xs font-semibold">Appointments and schedules.</p>
+              <p className="text-xs font-semibold">
+                See next appointments at a glance.
+              </p>
               <p className="mt-1 text-[11px] text-sky-100/80">
-                Patients and doctors see role based views.
+                Request or reschedule without calling the office.
               </p>
             </div>
 
@@ -188,9 +190,11 @@ export default function Login() {
                   Messages
                 </p>
               </div>
-              <p className="text-xs font-semibold">Secure communication.</p>
+              <p className="text-xs font-semibold">
+                Secure chat with your care team.
+              </p>
               <p className="mt-1 text-[11px] text-sky-100/80">
-                Message threads respect access control.
+                Get answers to follow-up questions quickly.
               </p>
             </div>
 
@@ -203,9 +207,11 @@ export default function Login() {
                   Results
                 </p>
               </div>
-              <p className="text-xs font-semibold">Labs and reports.</p>
+              <p className="text-xs font-semibold">
+                Labs and reports in one place.
+              </p>
               <p className="mt-1 text-[11px] text-sky-100/80">
-                Doctors and patients see only what they should.
+                Review trends with your clinician over time.
               </p>
             </div>
           </div>
@@ -215,26 +221,35 @@ export default function Login() {
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-400/10 border border-emerald-400/60 text-emerald-200">
                 <FiActivity size={14} />
               </span>
-              <p>We monitor unusual sign-ins to help keep accounts safe.</p>
+              <p>
+                Activity is monitored for unusual sign-ins to help keep your
+                account safe.
+              </p>
             </div>
           </div>
         </div>
       </section>
 
-      <header className="lg:hidden px-6 pt-7 pb-5 relative">
+      {/* Mobile header */}
+      <header className="md:hidden px-6 pt-7 pb-5 relative">
         <div className="flex items-center gap-2 mb-3">
           <div className="h-7 w-7 rounded-lg bg-white/10 border border-white/30 grid place-items-center">
             <div className="h-4 w-4 rounded-md bg-white" />
           </div>
-          <span className="text-lg font-semibold tracking-tight">HealthApp</span>
+          <span className="text-lg font-semibold tracking-tight">
+            HealthApp
+          </span>
         </div>
-        <h1 className="text-2xl font-extrabold tracking-tight">Welcome back</h1>
-        <p className="text-sm text-sky-100 mt-1 max-w-md">
-          Sign in to access your account.
+        <h1 className="text-2xl font-extrabold tracking-tight">
+          Welcome back
+        </h1>
+        <p className="text-sm text-sky-100 mt-1">
+          Sign in to manage appointments, results, and bills securely.
         </p>
       </header>
 
-      <section className="flex items-center justify-center px-6 pb-8 pt-2 sm:pt-4 md:pt-6 md:px-10 md:pb-10 relative">
+      {/* Right column: sign-in card */}
+      <section className="flex items-center justify-center px-6 pb-8 pt-4 md:px-10 md:py-10 relative">
         <div className="w-full max-w-md">
           <div className="rounded-3xl bg-white/98 text-slate-900 border border-slate-200/80 shadow-[0_18px_50px_rgba(15,23,42,0.45)] px-6 sm:px-8 py-7">
             <div className="flex items-center justify-between mb-4">
@@ -252,8 +267,16 @@ export default function Login() {
                 </div>
               </div>
               <span className="hidden sm:inline-flex items-center justify-center px-3 h-7 rounded-full border border-slate-200 bg-slate-50 text-[11px] font-medium text-slate-600 whitespace-nowrap">
-                HealthCare portal
+                Patient portal
               </span>
+            </div>
+
+            <div className="mb-3 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] sm:text-xs text-amber-900">
+              <p className="font-semibold">Clinicians and staff</p>
+              <p>
+                Use your organization credentials on the staff portal. No
+                separate sign-up is required.
+              </p>
             </div>
 
             {authError && (
@@ -263,27 +286,36 @@ export default function Login() {
               </div>
             )}
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 mt-3" noValidate>
+            <form
+              onSubmit={handleSubmit(onSubmit)}
+              className="space-y-5 mt-3"
+              noValidate
+            >
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                  Username
+                  Username or email
                 </label>
                 <Input
-                  placeholder="Enter your username"
+                  placeholder="Enter your username or email"
                   leftIcon={<FiUser size={18} />}
                   autoComplete="username"
                   {...register("username", {
-                    required: "Username is required",
+                    required: "Username or email is required",
                   })}
                 />
                 {usernameValue && (
                   <p className="mt-1 text-xs text-slate-500">
                     Signing in as{" "}
-                    <span className="font-mono text-slate-800">{usernameValue}</span>.
+                    <span className="font-mono text-slate-800">
+                      {usernameValue}
+                    </span>
+                    .
                   </p>
                 )}
                 {errors.username && (
-                  <p className="mt-1 text-xs text-rose-600">{errors.username.message}</p>
+                  <p className="mt-1 text-xs text-rose-600">
+                    {errors.username.message}
+                  </p>
                 )}
               </div>
 
@@ -310,7 +342,9 @@ export default function Login() {
                   })}
                 />
                 {errors.password && (
-                  <p className="mt-1 text-xs text-rose-600">{errors.password.message}</p>
+                  <p className="mt-1 text-xs text-rose-600">
+                    {errors.password.message}
+                  </p>
                 )}
               </div>
 
@@ -322,18 +356,28 @@ export default function Login() {
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border-2 border-emerald-500 text-emerald-600 bg-emerald-50">
                     <FiShield size={13} />
                   </span>
-                  <span>Your connection is encrypted. Do not share your login.</span>
+                  <span>
+                    Your connection is encrypted. Do not share your login with
+                    anyone.
+                  </span>
                 </div>
               </div>
 
-              <Button type="submit" disabled={isSubmitting} className="w-full mt-1">
+              <Button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full mt-1"
+              >
                 {isSubmitting ? "Signing in..." : "Sign in"}
               </Button>
 
               <p className="text-center text-sm text-slate-600">
-                Need an account{" "}
-                <Link to="/register" className="text-sky-700 font-medium hover:underline">
-                  Create an account
+                New to HealthApp{" "}
+                <Link
+                  to="/register"
+                  className="text-sky-700 font-medium hover:underline"
+                >
+                  Create patient account
                 </Link>
               </p>
 
@@ -354,3 +398,4 @@ export default function Login() {
     </div>
   );
 }
+
