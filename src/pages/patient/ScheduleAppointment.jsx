@@ -15,11 +15,12 @@ export default function ScheduleAppointment() {
   const [form, setForm] = useState({
     clinicianId: "",
     date: "",
-    time: "",
+    time: "", // store UTC ISO string now (slot.utc)
     reason: "",
     notes: "",
   });
-  const [slots, setSlots] = useState([]);
+
+  const [slots, setSlots] = useState([]); // array of { utc, label }
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -44,22 +45,43 @@ export default function ScheduleAppointment() {
     return parts.join(" · ");
   }, [selectedClinician]);
 
+  const selectedSlotLabel = useMemo(() => {
+    if (!form.time) return "";
+    const found = slots.find((s) => s.utc === form.time);
+    if (found?.label) return found.label;
+
+    // fallback: if it is an ISO string, format locally
+    try {
+      const d = new Date(form.time);
+      if (!Number.isNaN(d.getTime())) {
+        return d.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
+      }
+    } catch {}
+    return "";
+  }, [form.time, slots]);
+
   // Group available slots into morning / afternoon / evening for nicer layout
   const groupedSlots = useMemo(() => {
     const morning = [];
     const afternoon = [];
     const evening = [];
 
-    slots.forEach((t) => {
-      const hour = parseInt(String(t).split(":")[0], 10);
+    slots.forEach((s) => {
+      const label = String(s?.label || "");
+      const hour = parseInt(label.split(":")[0], 10);
+
       if (Number.isNaN(hour)) {
-        afternoon.push(t);
+        afternoon.push(s);
       } else if (hour < 12) {
-        morning.push(t);
+        morning.push(s);
       } else if (hour < 17) {
-        afternoon.push(t);
+        afternoon.push(s);
       } else {
-        evening.push(t);
+        evening.push(s);
       }
     });
 
@@ -69,9 +91,11 @@ export default function ScheduleAppointment() {
   // Load clinicians and (if rescheduling) the original appointment
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       try {
         setLoading(true);
+
         const [docs, existing] = await Promise.all([
           doctorService.list(),
           isReschedule && rescheduleId
@@ -84,11 +108,16 @@ export default function ScheduleAppointment() {
         setClinicians(docs || []);
 
         if (existing) {
+          // existing.dateTime in appointmentService is a Date object
+          const existingUtc = existing?.dateTime
+            ? new Date(existing.dateTime).toISOString()
+            : "";
+
           setForm({
-            clinicianId: existing.clinicianId,
-            date: existing.date,
-            time: existing.time,
-            reason: existing.title || "",
+            clinicianId: existing.clinicianId || existing.doctorId || "",
+            date: existing.date || "",
+            time: existingUtc, // store UTC ISO
+            reason: existing.title || existing.reason || "",
             notes: existing.notes || "",
           });
         }
@@ -110,9 +139,11 @@ export default function ScheduleAppointment() {
     }
 
     let mounted = true;
+
     (async () => {
       try {
         setLoadingSlots(true);
+
         const s = await appointmentService.getAvailability(
           form.date,
           form.clinicianId
@@ -122,10 +153,24 @@ export default function ScheduleAppointment() {
 
         let next = Array.isArray(s) ? s : [];
 
-        // If we are rescheduling and the current time is not in the returned list,
+        // If rescheduling and the selected UTC time is not in the returned list,
         // include it so the pill still appears selected.
-        if (form.time && !next.includes(form.time)) {
-          next = [form.time, ...next];
+        if (form.time && !next.some((x) => x?.utc === form.time)) {
+          const fallbackLabel = (() => {
+            try {
+              const d = new Date(form.time);
+              if (!Number.isNaN(d.getTime())) {
+                return d.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  hour12: false,
+                });
+              }
+            } catch {}
+            return "Selected";
+          })();
+
+          next = [{ utc: form.time, label: fallbackLabel }, ...next];
         }
 
         setSlots(next);
@@ -145,17 +190,19 @@ export default function ScheduleAppointment() {
     setForm((f) => ({
       ...f,
       [name]: value,
-      // When date or clinician changes, clear the previously selected time
+      // When date or clinician changes, clear selected UTC slot
       ...(name === "date" || name === "clinicianId" ? { time: "" } : {}),
     }));
   };
 
-  const onSelectSlot = (time) => {
-    setForm((f) => ({ ...f, time }));
+  const onSelectSlot = (slot) => {
+    // slot is { utc, label }
+    setForm((f) => ({ ...f, time: slot.utc }));
   };
 
   const onSubmit = async (e) => {
     e.preventDefault();
+
     if (!form.clinicianId || !form.date || !form.time || !form.reason) {
       alert("Please select a clinician, date, time, and enter a reason.");
       return;
@@ -168,17 +215,23 @@ export default function ScheduleAppointment() {
         await appointmentService.update(rescheduleId, {
           clinicianId: form.clinicianId,
           date: form.date,
-          time: form.time,
+          time: form.time, // UTC ISO
           reason: form.reason,
           notes: form.notes,
         });
       } else {
-        await appointmentService.create(form);
+        await appointmentService.create({
+          clinicianId: form.clinicianId,
+          date: form.date,
+          time: form.time, // UTC ISO
+          reason: form.reason,
+          notes: form.notes,
+        });
       }
 
       navigate("/patient/appointments");
     } catch (err) {
-      alert(err.message || "Failed to submit appointment");
+      alert(err?.message || "Failed to submit appointment");
     } finally {
       setSubmitting(false);
     }
@@ -193,7 +246,6 @@ export default function ScheduleAppointment() {
 
   return (
     <div className="mx-auto max-w-5xl px-2 sm:px-4 py-6">
-      {/* Hero header for scheduling */}
       <div className="rounded-[28px] border border-sky-100/80 bg-[radial-gradient(circle_at_top_left,#e0f2fe,transparent_55%),radial-gradient(circle_at_bottom_right,#e0e7ff,transparent_55%)] px-4 sm:px-6 py-4 sm:py-5 shadow-[0_22px_60px_rgba(15,23,42,0.22)]">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-6">
           <div className="min-w-0">
@@ -227,11 +279,8 @@ export default function ScheduleAppointment() {
         </div>
       </div>
 
-      {/* Main layout: form + summary */}
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        {/* Left: form */}
         <form onSubmit={onSubmit} className="space-y-5">
-          {/* Clinician */}
           <div className="rounded-2xl border border-slate-100 bg-white/95 shadow-sm p-4 sm:p-5 space-y-3">
             <div>
               <label className="block text-xs font-semibold tracking-[0.16em] uppercase text-slate-500">
@@ -253,15 +302,17 @@ export default function ScheduleAppointment() {
                   {loading ? "Loading clinicians…" : "Select a clinician…"}
                 </option>
                 {clinicians.map((c) => {
-                  const label = c.label || [
-                    c.name,
-                    c.specialty && `(${c.specialty})`,
-                    c.yearsExperience
-                      ? `${c.yearsExperience}+ years experience`
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ");
+                  const label =
+                    c.label ||
+                    [
+                      c.name,
+                      c.specialty && `(${c.specialty})`,
+                      c.yearsExperience
+                        ? `${c.yearsExperience}+ years experience`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ");
 
                   return (
                     <option key={c.id} value={c.id}>
@@ -272,7 +323,6 @@ export default function ScheduleAppointment() {
               </select>
             </div>
 
-            {/* Selected clinician highlight card */}
             {selectedClinician && (
               <div className="mt-2 rounded-2xl border border-sky-100 bg-gradient-to-r from-sky-50/90 via-white to-emerald-50/80 px-3.5 py-3 flex items-start gap-3">
                 <div className="mt-0.5 hidden sm:flex h-9 w-9 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 font-semibold">
@@ -297,14 +347,13 @@ export default function ScheduleAppointment() {
                     <span className="font-medium text-slate-800">
                       {selectedClinician.name}
                     </span>
-                    . You will see them listed on your appointment card.
+                    .
                   </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Date and time picker */}
           <div className="rounded-2xl border border-slate-100 bg-white/95 shadow-sm p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-50 text-sky-600">
@@ -349,7 +398,6 @@ export default function ScheduleAppointment() {
               </div>
             </div>
 
-            {/* Slot pills */}
             <div className="mt-2 rounded-xl border border-slate-100 bg-slate-50/60 p-3">
               {!form.date || !form.clinicianId ? (
                 <p className="text-xs sm:text-sm text-slate-500">
@@ -367,8 +415,7 @@ export default function ScheduleAppointment() {
                 </div>
               ) : slots.length === 0 ? (
                 <p className="text-xs sm:text-sm text-slate-600">
-                  No online slots are available for this day. Try a different
-                  date or contact the clinic for more options.
+                  No online slots are available for this day.
                 </p>
               ) : (
                 <div className="space-y-3">
@@ -378,18 +425,18 @@ export default function ScheduleAppointment() {
                         Morning
                       </p>
                       <div className="flex flex-wrap gap-2">
-                        {groupedSlots.morning.map((t) => (
+                        {groupedSlots.morning.map((s) => (
                           <button
-                            key={`m-${t}`}
+                            key={`m-${s.utc}`}
                             type="button"
-                            onClick={() => onSelectSlot(t)}
+                            onClick={() => onSelectSlot(s)}
                             className={`${slotBaseClasses} ${
-                              form.time === t
+                              form.time === s.utc
                                 ? slotSelectedClasses
                                 : slotIdleClasses
                             }`}
                           >
-                            {t}
+                            {s.label}
                           </button>
                         ))}
                       </div>
@@ -402,18 +449,18 @@ export default function ScheduleAppointment() {
                         Afternoon
                       </p>
                       <div className="flex flex-wrap gap-2">
-                        {groupedSlots.afternoon.map((t) => (
+                        {groupedSlots.afternoon.map((s) => (
                           <button
-                            key={`a-${t}`}
+                            key={`a-${s.utc}`}
                             type="button"
-                            onClick={() => onSelectSlot(t)}
+                            onClick={() => onSelectSlot(s)}
                             className={`${slotBaseClasses} ${
-                              form.time === t
+                              form.time === s.utc
                                 ? slotSelectedClasses
                                 : slotIdleClasses
                             }`}
                           >
-                            {t}
+                            {s.label}
                           </button>
                         ))}
                       </div>
@@ -426,18 +473,18 @@ export default function ScheduleAppointment() {
                         Evening
                       </p>
                       <div className="flex flex-wrap gap-2">
-                        {groupedSlots.evening.map((t) => (
+                        {groupedSlots.evening.map((s) => (
                           <button
-                            key={`e-${t}`}
+                            key={`e-${s.utc}`}
                             type="button"
-                            onClick={() => onSelectSlot(t)}
+                            onClick={() => onSelectSlot(s)}
                             className={`${slotBaseClasses} ${
-                              form.time === t
+                              form.time === s.utc
                                 ? slotSelectedClasses
                                 : slotIdleClasses
                             }`}
                           >
-                            {t}
+                            {s.label}
                           </button>
                         ))}
                       </div>
@@ -447,17 +494,15 @@ export default function ScheduleAppointment() {
               )}
             </div>
 
-            {/* Hidden field for JS validation / debugging */}
             <input type="hidden" name="time" value={form.time} readOnly />
           </div>
 
-          {/* Reason and notes */}
           <div className="rounded-2xl border border-slate-100 bg-white/95 shadow-sm p-4 sm:p-5 space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Reason for visit
               </label>
-            <input
+              <input
                 type="text"
                 name="reason"
                 value={form.reason}
@@ -485,7 +530,6 @@ export default function ScheduleAppointment() {
             </div>
           </div>
 
-          {/* Actions */}
           <div className="pt-2 flex flex-wrap items-center gap-3">
             <button
               type="submit"
@@ -500,6 +544,7 @@ export default function ScheduleAppointment() {
                 ? "Confirm new time"
                 : "Schedule appointment"}
             </button>
+
             <button
               type="button"
               onClick={() => navigate(-1)}
@@ -510,7 +555,6 @@ export default function ScheduleAppointment() {
           </div>
         </form>
 
-        {/* Right: live summary card */}
         <aside className="space-y-4">
           <div className="rounded-2xl border border-sky-100 bg-sky-50/70 backdrop-blur-sm p-4 sm:p-5 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">
             <p className="text-xs font-semibold tracking-[0.18em] uppercase text-sky-700">
@@ -534,7 +578,7 @@ export default function ScheduleAppointment() {
               </p>
               <p>
                 <span className="font-medium">Time:</span>{" "}
-                {form.time || "Not selected"}
+                {selectedSlotLabel || "Not selected"}
               </p>
               <p>
                 <span className="font-medium">Reason:</span>{" "}
@@ -545,8 +589,7 @@ export default function ScheduleAppointment() {
             <div className="mt-4 rounded-xl bg-white/70 border border-sky-100 px-3 py-2 text-[11px] text-sky-700">
               <p>
                 You will receive this appointment in your dashboard as soon as
-                it is scheduled. You can cancel or reschedule from the
-                Appointments page at any time.
+                it is scheduled.
               </p>
             </div>
           </div>
