@@ -42,7 +42,7 @@ function mapServerAppointment(a) {
 
   return {
     id: a.id,
-    dateTime: d,
+    dateTime: d, // Date object
     date: d.toISOString().slice(0, 10),
     time,
     clinicianId: a.doctorId,
@@ -72,21 +72,16 @@ function todayISO() {
   return `${y}-${m}-${day}`;
 }
 
-// Keep localStorage user in sync with patientId
-function syncPatientIdToAuth(patientId) {
-  if (!patientId) return;
+function viewerTimeZone() {
   try {
-    const raw = localStorage.getItem("user");
-    if (!raw) return;
-    const user = JSON.parse(raw);
-    if (!user) return;
-    if (user.patientId === patientId) return;
-
-    const updated = { ...user, patientId };
-    localStorage.setItem("user", JSON.stringify(updated));
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
   } catch {
-    // ignore parse errors
+    return undefined;
   }
+}
+
+function isIsoDateTimeString(v) {
+  return typeof v === "string" && v.includes("T") && (v.endsWith("Z") || v.includes("+"));
 }
 
 export const appointmentService = {
@@ -101,7 +96,6 @@ export const appointmentService = {
     if (!u?.token) throw new Error("Not authenticated");
   },
 
-  // Patient: upcoming appointments (future, scheduled)
   async listUpcoming() {
     await this.ensureLoggedIn();
     try {
@@ -109,17 +103,15 @@ export const appointmentService = {
       const list = Array.isArray(data?.data)
         ? data.data.map(mapServerAppointment)
         : [];
-      const filtered = list
+      return list
         .filter((a) => a.status === "SCHEDULED" && isFuture(a.dateTime))
         .sort((a, b) => a.dateTime - b.dateTime);
-      return filtered;
     } catch (e) {
       if (e?.response?.status === 404) return [];
       throw e;
     }
   },
 
-  // Patient: past appointments (any non-SCHEDULED status)
   async listPast() {
     await this.ensureLoggedIn();
     try {
@@ -127,13 +119,9 @@ export const appointmentService = {
       const list = Array.isArray(data?.data)
         ? data.data.map(mapServerAppointment)
         : [];
-
-      // Key change: show everything that is no longer SCHEDULED (COMPLETED, CANCELLED, NO_SHOW, etc.)
-      const filtered = list
+      return list
         .filter((a) => a.status && a.status !== "SCHEDULED")
         .sort((a, b) => b.dateTime - a.dateTime);
-
-      return filtered;
     } catch (e) {
       if (e?.response?.status === 404) return [];
       throw e;
@@ -146,46 +134,33 @@ export const appointmentService = {
     return mapServerAppointment(data?.data);
   },
 
+  // Create appointment
+  // IMPORTANT: time can be either:
+  // - slot.utc (ISO string) from availability (recommended)
+  // - old "HH:MM" string (legacy)
   async create({ clinicianId, date, time, reason, notes }) {
     await this.ensureLoggedIn();
 
-    const u = authService.getCurrentUser();
-    let patientId = u?.patientId;
-
-    if (!patientId) {
-      try {
-        const res = await http.get("/patients/me");
-        const patient = res?.data?.data || res?.data || null;
-        if (patient?.id) {
-          patientId = patient.id;
-          syncPatientIdToAuth(patientId);
-        }
-      } catch (e) {
-        const status = e?.response?.status;
-        if (status === 404) {
-          throw new Error(
-            "Please complete your profile before scheduling an appointment."
-          );
-        }
-        throw new Error(
-          "Unable to look up your patient profile. Please try again."
-        );
-      }
+    if (!clinicianId || !time) {
+      throw new Error("Missing clinicianId or time");
     }
 
-    if (!patientId) {
-      throw new Error(
-        "Please complete your profile before scheduling an appointment."
-      );
-    }
+    let iso;
 
-    const [hh, mm] = time.split(":");
-    const iso = new Date(
-      `${date}T${hh.padStart(2, "0")}:${mm.padStart(2, "0")}:00`
-    ).toISOString();
+    if (isIsoDateTimeString(time)) {
+      iso = new Date(time).toISOString();
+    } else {
+      // legacy HH:MM path
+      const [hh, mm] = String(time).split(":");
+      iso = new Date(
+        `${date}T${String(hh).padStart(2, "0")}:${String(mm).padStart(
+          2,
+          "0"
+        )}:00`
+      ).toISOString();
+    }
 
     const { data } = await http.post("/appointments", {
-      patientId,
       doctorId: clinicianId,
       dateTime: iso,
       reason,
@@ -198,10 +173,25 @@ export const appointmentService = {
   async update(id, payload) {
     await this.ensureLoggedIn();
     const { clinicianId, date, time, reason, notes } = payload;
-    const [hh, mm] = time.split(":");
-    const iso = new Date(
-      `${date}T${hh.padStart(2, "0")}:${mm.padStart(2, "0")}:00`
-    ).toISOString();
+
+    if (!clinicianId || !time) {
+      throw new Error("Missing clinicianId or time");
+    }
+
+    let iso;
+
+    if (isIsoDateTimeString(time)) {
+      iso = new Date(time).toISOString();
+    } else {
+      // legacy HH:MM path
+      const [hh, mm] = String(time).split(":");
+      iso = new Date(
+        `${date}T${String(hh).padStart(2, "0")}:${String(mm).padStart(
+          2,
+          "0"
+        )}:00`
+      ).toISOString();
+    }
 
     const { data } = await http.put(`/appointments/${id}`, {
       doctorId: clinicianId,
@@ -209,6 +199,7 @@ export const appointmentService = {
       reason,
       notes,
     });
+
     return mapServerAppointment(data?.data);
   },
 
@@ -218,19 +209,39 @@ export const appointmentService = {
     return true;
   },
 
+  // Returns normalized slots: [{ utc, label }]
   async getAvailability(date, clinicianId) {
     try {
+      const tz = viewerTimeZone();
+
       const { data } = await http.get("/appointments/availability", {
-        params: { date, doctorId: clinicianId },
+        params: { date, doctorId: clinicianId, viewerTz: tz },
       });
-      const slots = data?.data?.slots || data?.slots || [];
-      return Array.isArray(slots) ? slots : [];
+
+      const raw = data?.data?.slots || data?.slots || [];
+      if (!Array.isArray(raw)) return [];
+
+      return raw
+        .map((s) => {
+          if (typeof s === "string") {
+            return { utc: null, label: s };
+          }
+          if (s && typeof s === "object") {
+            return {
+              utc: s.utc,
+              label: s.viewerTime || s.clinicTime || s.utc,
+            };
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .filter((x) => typeof x.utc === "string" && x.utc.length > 0);
     } catch {
-      return ["09:00", "09:30", "10:00", "10:30", "14:00", "14:30"];
+      // keep empty instead of fake times in production
+      return [];
     }
   },
 
-  // Doctor: all upcoming appointments (not tied to a single day)
   async listDoctorUpcoming() {
     await this.ensureLoggedIn();
     try {
@@ -238,17 +249,15 @@ export const appointmentService = {
       const list = Array.isArray(data?.data)
         ? data.data.map(mapServerAppointment)
         : [];
-      const filtered = list
+      return list
         .filter((a) => a.status === "SCHEDULED" && isFuture(a.dateTime))
         .sort((a, b) => a.dateTime - b.dateTime);
-      return filtered;
     } catch (e) {
       if (e?.response?.status === 404) return [];
       throw e;
     }
   },
 
-  // Doctor: schedule for a specific day
   async listDoctorForDate(dateISO) {
     await this.ensureLoggedIn();
     const date = dateISO || todayISO();
@@ -266,7 +275,6 @@ export const appointmentService = {
     }
   },
 
-  // Convenience helper: today’s schedule for doctor
   async listDoctorToday() {
     return this.listDoctorForDate(todayISO());
   },
